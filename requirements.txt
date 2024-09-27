@@ -1,0 +1,6 @@
+fastapi[standard]
+aio-pika
+redis
+python-dotenv
+sqlalchemy
+psycopg2
