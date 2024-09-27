@@ -1,0 +1,6 @@
+class EVENT_TYPES:
+    USER_CREATED = "USER_CREATED"
+
+
+class RPC_TYPES:
+    TEST_RPC = "TEST_RPC"

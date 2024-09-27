@@ -11,7 +11,7 @@
   - `services`: Responsible for handling the business logic.
   - `routes`: Responsible for handling the API routes.
   - `utils`: Responsible for handling the utility functions.
-  - `types`: Responsible for handling the type definitions for request and response payloads.
+  - `types`: Responsible for handling the type definitions for request and response payloads and broker messages.
   - `dependencies.py`: Responsible for handling the dependencies and middlewares.
 
 ### Broker
