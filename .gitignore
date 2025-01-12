@@ -139,3 +139,4 @@ requests.http
 
 # Docker
 docker/
+.DS_Store

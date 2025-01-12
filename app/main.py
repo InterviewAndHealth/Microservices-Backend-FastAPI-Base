@@ -1,11 +1,12 @@
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
 import asyncio
+from contextlib import asynccontextmanager
 
+from fastapi import FastAPI
+
+from app import SERVICE_QUEUE
 from app.routes.users import router as users_router
 from app.services.broker import EventService, RPCService
 from app.services.user import UserService
-from app import SERVICE_QUEUE
 
 
 @asynccontextmanager

@@ -1,11 +1,12 @@
 from fastapi import HTTPException
 
 from app import TEST_QUEUE, TEST_RPC
-from app.database.repository import UserRepository
 from app.database.models import User as UserModel
-from app.types.user import UserCreate, User as UserSchema
+from app.database.repository import UserRepository
 from app.services.broker import EventService, RPCService
 from app.types.broker import EVENT_TYPES, RPC_TYPES
+from app.types.user import User as UserSchema
+from app.types.user import UserCreate
 
 
 class UserService:

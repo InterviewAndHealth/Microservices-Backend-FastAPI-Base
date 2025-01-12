@@ -1,42 +1,34 @@
+import logging
+
 import aio_pika
 
-from app import RABBITMQ_URL, EXCHANGE_NAME
+from app import RABBITMQ_URL
 
 
 class Broker:
     """RabbitMQ broker"""
 
-    _channel = None
-    _exchange = None
+    _connection = None
 
     @classmethod
-    async def connect(cls):
+    async def connect(cls) -> aio_pika.Connection:
         """Connect to RabbitMQ"""
 
-        if cls._channel:
-            return cls._channel
         try:
+            if cls._connection:
+                return cls._connection
             connection = await aio_pika.connect_robust(RABBITMQ_URL)
-            channel = await connection.channel()
-            cls._channel = channel
-            print("Connected to RabbitMQ")
-            return channel
+            cls._connection = connection
+            logging.info("Connected to RabbitMQ")
+            return connection
         except Exception as err:
-            print(f"Failed to connect to RabbitMQ: {err}")
+            logging.error(f"Failed to connect to RabbitMQ: {err}")
 
     @classmethod
-    async def channel(cls):
-        """Create a new channel"""
+    async def close(cls):
+        """Close the connection to RabbitMQ"""
 
-        if cls._exchange:
-            return cls._exchange
-        try:
-            channel = await cls.connect()
-            exchange = await channel.declare_exchange(
-                EXCHANGE_NAME, aio_pika.ExchangeType.DIRECT, durable=True
-            )
-            cls._exchange = exchange
-            print("Created RabbitMQ exchange")
-            return exchange
-        except Exception as err:
-            print(f"Failed to create RabbitMQ channel: {err}")
+        if cls._connection:
+            await cls._connection.close()
+            cls._connection = None
+            logging.info("Closed RabbitMQ connection")

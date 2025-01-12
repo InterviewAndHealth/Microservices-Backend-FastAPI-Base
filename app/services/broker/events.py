@@ -1,13 +1,62 @@
-import aio_pika
 import json
 import logging
 
-from app.services.broker import Broker
+import aio_pika
+
 from app import EXCHANGE_NAME, SERVICE_QUEUE
+from app.services.broker import Broker
 
 
 class EventService:
     """Publish and subscribe to events"""
+
+    @staticmethod
+    def build_request_payload(
+        type: str,
+        data: dict,
+    ) -> dict:
+        """
+        Build a request payload
+
+        Parameters
+        ----------
+        type : str
+            The request type
+        data : dict
+            The request data
+
+        Returns
+        -------
+        dict
+            The request payload
+
+        Examples
+        --------
+        >>> RPCService.build_request_payload("type", {"key": "value"})
+        """
+
+        return {
+            "type": type,
+            "data": data,
+        }
+
+    _publishChannel = None
+
+    @staticmethod
+    async def _get_publish_channel():
+        """Return a channel and exchange for publishing events"""
+        if EventService._publishChannel:
+            return EventService._publishChannel
+
+        connection = await Broker.connect()
+        channel = await connection.channel()
+        exchange = await channel.declare_exchange(
+            EXCHANGE_NAME,
+            aio_pika.ExchangeType.DIRECT,
+            durable=True,
+        )
+        EventService._publishChannel = exchange
+        return exchange
 
     @staticmethod
     async def publish(service: str, data: dict):
@@ -30,12 +79,12 @@ class EventService:
         >>> await EventService.publish("service", {"key": "value"})
         """
         try:
-            exchange = await Broker.channel()
+            exchange = await EventService._get_publish_channel()
             message = json.dumps(data)
             await exchange.publish(
                 aio_pika.Message(body=message.encode()), routing_key=service
             )
-            logging.info(f"Published event to {service}: {data}")
+            logging.info(f"Published event to {service}")
         except Exception as err:
             logging.error(f"Failed to publish event: {err}")
 
@@ -64,18 +113,33 @@ class EventService:
         ...
         >>> await EventService.subscribe("service", Subscriber)
         """
-
         try:
-            channel = await Broker.connect()
-            queue = await channel.declare_queue(SERVICE_QUEUE, durable=True)
-            await queue.bind(exchange=EXCHANGE_NAME, routing_key=service)
+            connection = await Broker.connect()
+            channel = await connection.channel()
+            await channel.set_qos(prefetch_count=1)
+            exchange = await channel.declare_exchange(
+                EXCHANGE_NAME,
+                aio_pika.ExchangeType.DIRECT,
+                durable=True,
+            )
+            queue = await channel.declare_queue(
+                SERVICE_QUEUE,
+                durable=True,
+                arguments={"x-queue-type": "quorum"},
+            )
+            await queue.bind(exchange=exchange, routing_key=service)
 
-            async with queue.iterator() as queue_iter:
-                async for message in queue_iter:
-                    async with message.process():
+            async def process_message(message: aio_pika.IncomingMessage):
+                async with message.process(ignore_processed=True):
+                    try:
                         data = json.loads(message.body)
                         await subscriber.handle_event(data)
+                        await message.ack()
+                    except Exception as process_error:
+                        logging.error(f"Error processing message: {process_error}")
+                        await message.nack(requeue=True)
 
+            await queue.consume(process_message, no_ack=False)
             logging.info(f"Subscribed to service: {service}")
         except Exception as err:
-            logging.error(f"Failed to subscribe to service: {err}")
+            logging.error(f"Subscription error for {service}: {err}")

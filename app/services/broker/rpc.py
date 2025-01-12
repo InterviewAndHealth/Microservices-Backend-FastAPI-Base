@@ -1,16 +1,47 @@
-import aio_pika
-import json
-import uuid
 import asyncio
+import json
 import logging
+import uuid
+
+import aio_pika
 from fastapi import HTTPException
 
-from app.services.broker import Broker
 from app import RPC_QUEUE
+from app.services.broker import Broker
 
 
 class RPCService:
     """RPC service"""
+
+    @staticmethod
+    def build_request_payload(
+        type: str,
+        data: dict,
+    ) -> dict:
+        """
+        Build a request payload
+
+        Parameters
+        ----------
+        type : str
+            The request type
+        data : dict
+            The request data
+
+        Returns
+        -------
+        dict
+            The request payload
+
+        Examples
+        --------
+        >>> RPCService.build_request_payload("type", {"key": "value"})
+        """
+
+        return {
+            "type": type,
+            "data": data,
+        }
 
     @staticmethod
     async def request(
@@ -39,11 +70,12 @@ class RPCService:
         --------
         >>> RPCService.request("service", {"key": "value"})
         """
+        correlation_id = str(uuid.uuid4())
 
         try:
-            correlation_id = str(uuid.uuid4())
-            channel = await Broker.connect()
-            queue = await channel.declare_queue("", exclusive=True)
+            connection = await Broker.connect()
+            channel = await connection.channel()
+            queue = await channel.declare_queue("", exclusive=True, auto_delete=True)
 
             future = asyncio.get_event_loop().create_future()
 
@@ -53,7 +85,7 @@ class RPCService:
                         future.set_result(json.loads(message.body))
                         await message.ack()
 
-            await queue.consume(on_response)
+            consumer_tag = await queue.consume(on_response)
 
             await channel.default_exchange.publish(
                 aio_pika.Message(
@@ -64,11 +96,20 @@ class RPCService:
                 routing_key=service_rpc,
             )
 
-            return await asyncio.wait_for(future, timeout)
+            response = await asyncio.wait_for(future, timeout)
+
+            return response
         except asyncio.TimeoutError:
-            raise HTTPException(status_code=408, detail="Request timeout")
+            raise HTTPException(status_code=408, detail="Request timed out")
         except Exception as err:
             logging.error(f"Failed to request data: {err}")
+        finally:
+            try:
+                await queue.cancel(consumer_tag)
+                await queue.delete()
+                await channel.close()
+            except Exception as delete_err:
+                logging.error(f"Failed to delete queue: {delete_err}")
 
     @staticmethod
     async def respond(responder):
@@ -93,10 +134,11 @@ class RPCService:
         ...
         >>> RPCService.respond(Responder)
         """
-
         try:
-            channel = await Broker.connect()
-            queue = await channel.declare_queue(RPC_QUEUE)
+            connection = await Broker.connect()
+            channel = await connection.channel()
+            queue = await channel.declare_queue(RPC_QUEUE, auto_delete=True)
+            logging.info(f"Responding to RPC requests: {RPC_QUEUE}")
 
             async with queue.iterator() as queue_iter:
                 async for message in queue_iter:
@@ -112,3 +154,8 @@ class RPCService:
                         )
         except Exception as err:
             logging.error(f"Failed to respond to request: {err}")
+        finally:
+            try:
+                await channel.close()
+            except Exception as close_err:
+                logging.error(f"Failed to close channel: {close_err}")
